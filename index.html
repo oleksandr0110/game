@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Road Dodge — мини-игра</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #10151d;
+      --panel: #1a2330;
+      --text: #f4f7fb;
+      --muted: #aab6c5;
+      --accent: #63e6be;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 20px;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 50% 0%, #243449 0, transparent 55%),
+        var(--bg);
+      color: var(--text);
+      font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .game-shell {
+      width: min(100%, 520px);
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.25rem, 4vw, 1.7rem);
+      letter-spacing: .02em;
+    }
+
+    .scoreboard {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      color: var(--muted);
+      font-size: .9rem;
+      text-align: right;
+    }
+
+    .scoreboard strong {
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .game-frame {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #3a485a;
+      border-radius: 18px;
+      background: #202a35;
+      box-shadow: 0 20px 60px #0005;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: min(68vh, 650px);
+      min-height: 380px;
+      touch-action: none;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #0b1019b8;
+      text-align: center;
+    }
+
+    .overlay[hidden] { display: none; }
+
+    .dialog {
+      width: min(100%, 320px);
+      padding: 24px;
+      border: 1px solid #ffffff24;
+      border-radius: 18px;
+      background: #182230f2;
+      box-shadow: 0 12px 40px #0005;
+    }
+
+    .dialog h2 { margin: 0 0 8px; font-size: 1.6rem; }
+    .dialog p { margin: 0 0 18px; color: var(--muted); }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 18px;
+      background: var(--accent);
+      color: #09251e;
+      font: inherit;
+      font-weight: 750;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    button:focus-visible {
+      outline: 3px solid white;
+      outline-offset: 3px;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 18px;
+      margin-top: 14px;
+    }
+
+    .controls button {
+      width: 94px;
+      min-height: 54px;
+      background: var(--panel);
+      border: 1px solid #3a485a;
+      color: var(--text);
+      font-size: 1.35rem;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .controls button:active { background: #2b3b4d; }
+
+    .hint {
+      margin: 12px 0 0;
+      color: var(--muted);
+      text-align: center;
+      font-size: .88rem;
+    }
+
+    @media (max-width: 420px) {
+      body { padding: 12px; }
+      canvas { min-height: 360px; height: 62vh; }
+      .scoreboard { gap: 6px; font-size: .8rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="game-shell">
+    <header class="topbar">
+      <h1>🚗 Road Dodge</h1>
+      <div class="scoreboard" aria-live="polite">
+        <span>Счёт: <strong id="score">0</strong></span>
+        <span>Рекорд: <strong id="best">0</strong></span>
+      </div>
+    </header>
+
+    <section class="game-frame" aria-label="Игровое поле">
+      <canvas id="game" aria-label="Уклоняйся от препятствий"></canvas>
+      <div class="overlay" id="overlay">
+        <div class="dialog">
+          <h2 id="overlay-title">Готов к поездке?</h2>
+          <p id="overlay-text">Уклоняйся от препятствий и продержись как можно дольше.</p>
+          <button id="start-button" type="button">Начать игру</button>
+        </div>
+      </div>
+    </section>
+
+    <nav class="controls" aria-label="Управление машинкой">
+      <button id="left-button" type="button" aria-label="Двигаться влево">←</button>
+      <button id="right-button" type="button" aria-label="Двигаться вправо">→</button>
+    </nav>
+    <p class="hint">Клавиши ← → или A / D. На телефоне используй кнопки.</p>
+  </main>
+
+  <script>
+    "use strict";
+
+    (() => {
+      const canvas = document.querySelector("#game");
+      const ctx = canvas.getContext("2d");
+      const scoreElement = document.querySelector("#score");
+      const bestElement = document.querySelector("#best");
+      const overlay = document.querySelector("#overlay");
+      const overlayTitle = document.querySelector("#overlay-title");
+      const overlayText = document.querySelector("#overlay-text");
+      const startButton = document.querySelector("#start-button");
+      const leftButton = document.querySelector("#left-button");
+      const rightButton = document.querySelector("#right-button");
+
+      const CONFIG = Object.freeze({
+        roadWidthRatio: 0.78,
+        carWidth: 38,
+        carHeight: 62,
+        carBottomOffset: 28,
+        carSpeed: 340,
+        obstacleMinWidth: 34,
+        obstacleMaxWidth: 58,
+        obstacleMinHeight: 34,
+        obstacleMaxHeight: 58,
+        initialObstacleSpeed: 210,
+        speedIncreasePerSecond: 3.2,
+        initialSpawnInterval: 0.9,
+        minimumSpawnInterval: 0.38
+      });
+
+      const keys = new Set();
+      const heldDirections = { left: false, right: false };
+
+      let width = 0;
+      let height = 0;
+      let roadLeft = 0;
+      let roadWidth = 0;
+      let lastFrameTime = 0;
+      let elapsed = 0;
+      let score = 0;
+      let bestScore = readBestScore();
+      let spawnTimer = 0;
+      let obstacles = [];
+      let running = false;
+      let animationId = 0;
+
+      const car = { x: 0, y: 0, width: CONFIG.carWidth, height: CONFIG.carHeight };
+
+      bestElement.textContent = String(bestScore);
+
+      function readBestScore() {
+        try {
+          return Number.parseInt(localStorage.getItem("roadDodgeBest") || "0", 10) || 0;
+        } catch {
+          return 0;
+        }
+      }
+
+      function saveBestScore(value) {
+        try {
+          localStorage.setItem("roadDodgeBest", String(value));
+        } catch {
+          // Игра продолжает работать, даже если хранилище недоступно.
+        }
+      }
+
+      function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        width = rect.width;
+        height = rect.height;
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        roadWidth = width * CONFIG.roadWidthRatio;
+        roadLeft = (width - roadWidth) / 2;
+        car.y = height - CONFIG.carBottomOffset - car.height;
+        car.x = clamp(car.x || width / 2 - car.width / 2,
+          roadLeft + 8, roadLeft + roadWidth - car.width - 8);
+
+        draw();
+      }
+
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function randomBetween(min, max) {
+        return min + Math.random() * (max - min);
+      }
+
+      function resetGame() {
+        elapsed = 0;
+        score = 0;
+        spawnTimer = 0.35;
+        obstacles = [];
+        car.x = width / 2 - car.width / 2;
+        car.y = height - CONFIG.carBottomOffset - car.height;
+        scoreElement.textContent = "0";
+      }
+
+      function startGame() {
+        cancelAnimationFrame(animationId);
+        resetGame();
+        running = true;
+        overlay.hidden = true;
+        lastFrameTime = performance.now();
+        animationId = requestAnimationFrame(gameLoop);
+      }
+
+      function endGame() {
+        running = false;
+        const finalScore = Math.floor(score);
+
+        if (finalScore > bestScore) {
+          bestScore = finalScore;
+          bestElement.textContent = String(bestScore);
+          saveBestScore(bestScore);
+        }
+
+        overlayTitle.textContent = "Игра окончена";
+        overlayText.textContent = `Твой счёт: ${finalScore}. Попробуешь ещё раз?`;
+        startButton.textContent = "Играть снова";
+        overlay.hidden = false;
+      }
+
+      function spawnObstacle() {
+        const obstacleWidth = randomBetween(
+          CONFIG.obstacleMinWidth, CONFIG.obstacleMaxWidth
+        );
+        const obstacleHeight = randomBetween(
+          CONFIG.obstacleMinHeight, CONFIG.obstacleMaxHeight
+        );
+        const padding = 8;
+        const minX = roadLeft + padding;
+        const maxX = roadLeft + roadWidth - obstacleWidth - padding;
+
+        obstacles.push({
+          x: randomBetween(minX, Math.max(minX, maxX)),
+          y: -obstacleHeight,
+          width: obstacleWidth,
+          height: obstacleHeight,
+          color: Math.random() < 0.5 ? "#f97373" : "#f5b942"
+        });
+      }
+
+      function intersects(a, b) {
+        const insetA = 5;
+        const insetB = 4;
+        return (
+          a.x + insetA < b.x + b.width - insetB &&
+          a.x + a.width - insetA > b.x + insetB &&
+          a.y + insetA < b.y + b.height - insetB &&
+          a.y + a.height - insetA > b.y + insetB
+        );
+      }
+
+      function update(deltaTime) {
+        elapsed += deltaTime;
+        score += deltaTime * 10;
+        scoreElement.textContent = String(Math.floor(score));
+
+        const leftPressed = keys.has("ArrowLeft") || keys.has("a") ||
+          keys.has("A") || heldDirections.left;
+        const rightPressed = keys.has("ArrowRight") || keys.has("d") ||
+          keys.has("D") || heldDirections.right;
+
+        if (leftPressed !== rightPressed) {
+          const direction = leftPressed ? -1 : 1;
+          car.x += direction * CONFIG.carSpeed * deltaTime;
+        }
+
+        car.x = clamp(
+          car.x,
+          roadLeft + 8,
+          roadLeft + roadWidth - car.width - 8
+        );
+
+        const speed = CONFIG.initialObstacleSpeed +
+          elapsed * CONFIG.speedIncreasePerSecond;
+        const spawnInterval = Math.max(
+          CONFIG.minimumSpawnInterval,
+          CONFIG.initialSpawnInterval - elapsed * 0.008
+        );
+
+        spawnTimer -= deltaTime;
+        if (spawnTimer <= 0) {
+          spawnObstacle();
+          spawnTimer = spawnInterval;
+        }
+
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+          const obstacle = obstacles[i];
+          obstacle.y += speed * deltaTime;
+
+          if (intersects(car, obstacle)) {
+            endGame();
+            return;
+          }
+
+          if (obstacle.y > height) {
+            obstacles.splice(i, 1);
+          }
+        }
+      }
+
+      function roundedRect(x, y, w, h, radius) {
+        const r = Math.min(radius, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+      }
+
+      function drawCar() {
+        // Тень
+        ctx.fillStyle = "#0005";
+        roundedRect(car.x + 3, car.y + 5, car.width, car.height, 10);
+        ctx.fill();
+
+        // Колёса
+        ctx.fillStyle = "#111820";
+        ctx.fillRect(car.x - 4, car.y + 11, 7, 15);
+        ctx.fillRect(car.x + car.width - 3, car.y + 11, 7, 15);
+        ctx.fillRect(car.x - 4, car.y + car.height - 25, 7, 15);
+        ctx.fillRect(car.x + car.width - 3, car.y + car.height - 25, 7, 15);
+
+        // Кузов
+        const bodyGradient = ctx.createLinearGradient(car.x, car.y, car.x + car.width, car.y);
+        bodyGradient.addColorStop(0, "#38bdf8");
+        bodyGradient.addColorStop(0.5, "#0ea5e9");
+        bodyGradient.addColorStop(1, "#0284c7");
+        ctx.fillStyle = bodyGradient;
+        roundedRect(car.x, car.y, car.width, car.height, 10);
+        ctx.fill();
+
+        // Стёкла
+        ctx.fillStyle = "#bcecff";
+        roundedRect(car.x + 7, car.y + 12, car.width - 14, 15, 5);
+        ctx.fill();
+        ctx.fillStyle = "#075985";
+        roundedRect(car.x + 7, car.y + 33, car.width - 14, 12, 4);
+        ctx.fill();
+
+        // Фары
+        ctx.fillStyle = "#fff4b8";
+        ctx.fillRect(car.x + 5, car.y + 3, 8, 4);
+        ctx.fillRect(car.x + car.width - 13, car.y + 3, 8, 4);
+        ctx.fillStyle = "#fb7185";
+        ctx.fillRect(car.x + 5, car.y + car.height - 6, 8, 3);
+        ctx.fillRect(car.x + car.width - 13, car.y + car.height - 6, 8, 3);
+      }
+
+      function drawObstacle(obstacle) {
+        ctx.fillStyle = "#0004";
+        roundedRect(obstacle.x + 3, obstacle.y + 4,
+          obstacle.width, obstacle.height, 8);
+        ctx.fill();
+
+        ctx.fillStyle = obstacle.color;
+        roundedRect(obstacle.x, obstacle.y,
+          obstacle.width, obstacle.height, 8);
+        ctx.fill();
+
+        ctx.fillStyle = "#ffffff45";
+        roundedRect(obstacle.x + 6, obstacle.y + 6,
+          obstacle.width - 12, Math.max(5, obstacle.height * 0.18), 4);
+        ctx.fill();
+
+        ctx.fillStyle = "#17212b";
+        const wheelW = 5;
+        ctx.fillRect(obstacle.x - 2, obstacle.y + 8, wheelW, 11);
+        ctx.fillRect(obstacle.x + obstacle.width - 3, obstacle.y + 8, wheelW, 11);
+        ctx.fillRect(obstacle.x - 2, obstacle.y + obstacle.height - 19, wheelW, 11);
+        ctx.fillRect(obstacle.x + obstacle.width - 3,
+          obstacle.y + obstacle.height - 19, wheelW, 11);
+      }
+
+      function draw() {
+        if (!width || !height) return;
+
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = "#17212b";
+        ctx.fillRect(0, 0, width, height);
+
+        // Обочины
+        ctx.fillStyle = "#263b34";
+        ctx.fillRect(0, 0, roadLeft, height);
+        ctx.fillRect(roadLeft + roadWidth, 0, width - roadLeft - roadWidth, height);
+
+        // Дорога
+        ctx.fillStyle = "#303a46";
+        ctx.fillRect(roadLeft, 0, roadWidth, height);
+
+        // Краевые линии
+        ctx.fillStyle = "#dce4ec";
+        ctx.fillRect(roadLeft + 5, 0, 3, height);
+        ctx.fillRect(roadLeft + roadWidth - 8, 0, 3, height);
+
+        // Движущаяся разметка
+        const dashHeight = 34;
+        const dashGap = 28;
+        const offset = (elapsed * (CONFIG.initialObstacleSpeed * 0.7)) % (dashHeight + dashGap);
+        ctx.fillStyle = "#c5d0dc";
+        for (let y = -dashHeight + offset; y < height; y += dashHeight + dashGap) {
+          ctx.fillRect(width / 2 - 2, y, 4, dashHeight);
+        }
+
+        for (const obstacle of obstacles) drawObstacle(obstacle);
+        drawCar();
+      }
+
+      function gameLoop(timestamp) {
+        if (!running) return;
+
+        // Ограничение deltaTime предотвращает скачок объектов после потери фокуса.
+        const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, 0.033);
+        lastFrameTime = timestamp;
+
+        update(deltaTime);
+        draw();
+
+        if (running) {
+          animationId = requestAnimationFrame(gameLoop);
+        }
+      }
+
+      function bindHoldButton(button, direction) {
+        const release = () => { heldDirections[direction] = false; };
+
+        button.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          heldDirections[direction] = true;
+          try { button.setPointerCapture(event.pointerId); } catch {}
+        });
+        button.addEventListener("pointerup", release);
+        button.addEventListener("pointercancel", release);
+        button.addEventListener("lostpointercapture", release);
+        button.addEventListener("contextmenu", (event) => event.preventDefault());
+      }
+
+      document.addEventListener("keydown", (event) => {
+        const key = event.key;
+        if (["ArrowLeft", "ArrowRight", " "].includes(key)) {
+          event.preventDefault();
+        }
+
+        keys.add(key);
+        if (!running && (key === "Enter" || key === " ")) {
+          startGame();
+        }
+      });
+
+      document.addEventListener("keyup", (event) => keys.delete(event.key));
+      window.addEventListener("blur", () => {
+        keys.clear();
+        heldDirections.left = false;
+        heldDirections.right = false;
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          keys.clear();
+          heldDirections.left = false;
+          heldDirections.right = false;
+        }
+      });
+
+      bindHoldButton(leftButton, "left");
+      bindHoldButton(rightButton, "right");
+      startButton.addEventListener("click", startGame);
+
+      window.addEventListener("resize", resizeCanvas);
+
+      resizeCanvas();
+    })();
+  </script>
+</body>
+</html>
